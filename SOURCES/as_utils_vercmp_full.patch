@@ -1,0 +1,144 @@
+From d651281e77120ce4c7431364e4787f08189666b6 Mon Sep 17 00:00:00 2001
+From: Richard Hughes <richard@hughsie.com>
+Date: Wed, 24 Oct 2018 10:15:00 +0100
+Subject: [PATCH 1/2] Add as_utils_vercmp_full() for gnome-software
+
+Sometimes we don't want to do the firmware-style heuristics.
+---
+ libappstream-glib/as-utils.c | 42 ++++++++++++++++++++++++++++--------
+ libappstream-glib/as-utils.h | 14 ++++++++++++
+ 2 files changed, 47 insertions(+), 9 deletions(-)
+
+diff --git a/libappstream-glib/as-utils.c b/libappstream-glib/as-utils.c
+index 29f1637..62d411a 100644
+--- a/libappstream-glib/as-utils.c
++++ b/libappstream-glib/as-utils.c
+@@ -1388,22 +1388,23 @@ as_utils_vercmp_chunk (const gchar *str1, const gchar *str2)
+ }
+ 
+ /**
+- * as_utils_vercmp:
++ * as_utils_vercmp_full:
+  * @version_a: the release version, e.g. 1.2.3
+  * @version_b: the release version, e.g. 1.2.3.1
++ * @flags: some #AsVersionCompareFlag
+  *
+  * Compares version numbers for sorting.
+  *
+  * Returns: -1 if a < b, +1 if a > b, 0 if they are equal, and %G_MAXINT on error
+  *
+- * Since: 0.3.5
++ * Since: 0.7.14
+  */
+ gint
+-as_utils_vercmp (const gchar *version_a, const gchar *version_b)
++as_utils_vercmp_full (const gchar *version_a,
++		      const gchar *version_b,
++		      AsVersionCompareFlag flags)
+ {
+ 	guint longest_split;
+-	g_autofree gchar *str_a = NULL;
+-	g_autofree gchar *str_b = NULL;
+ 	g_auto(GStrv) split_a = NULL;
+ 	g_auto(GStrv) split_b = NULL;
+ 
+@@ -1416,10 +1417,15 @@ as_utils_vercmp (const gchar *version_a, const gchar *version_b)
+ 		return 0;
+ 
+ 	/* split into sections, and try to parse */
+-	str_a = as_utils_version_parse (version_a);
+-	str_b = as_utils_version_parse (version_b);
+-	split_a = g_strsplit (str_a, ".", -1);
+-	split_b = g_strsplit (str_b, ".", -1);
++	if (flags & AS_VERSION_COMPARE_FLAG_USE_HEURISTICS) {
++		g_autofree gchar *str_a = as_utils_version_parse (version_a);
++		g_autofree gchar *str_b = as_utils_version_parse (version_b);
++		split_a = g_strsplit (str_a, ".", -1);
++		split_b = g_strsplit (str_b, ".", -1);
++	} else {
++		split_a = g_strsplit (version_a, ".", -1);
++		split_b = g_strsplit (version_b, ".", -1);
++	}
+ 	longest_split = MAX (g_strv_length (split_a), g_strv_length (split_b));
+ 	for (guint i = 0; i < longest_split; i++) {
+ 		gchar *endptr_a = NULL;
+@@ -1456,6 +1462,24 @@ as_utils_vercmp (const gchar *version_a, const gchar *version_b)
+ 	return 0;
+ }
+ 
++/**
++ * as_utils_vercmp:
++ * @version_a: the release version, e.g. 1.2.3
++ * @version_b: the release version, e.g. 1.2.3.1
++ *
++ * Compares version numbers for sorting.
++ *
++ * Returns: -1 if a < b, +1 if a > b, 0 if they are equal, and %G_MAXINT on error
++ *
++ * Since: 0.3.5
++ */
++gint
++as_utils_vercmp (const gchar *version_a, const gchar *version_b)
++{
++	return as_utils_vercmp_full (version_a, version_b,
++				     AS_VERSION_COMPARE_FLAG_USE_HEURISTICS);
++}
++
+ /**
+  * as_ptr_array_find_string:
+  * @array: gchar* array
+diff --git a/libappstream-glib/as-utils.h b/libappstream-glib/as-utils.h
+index ecb7cdd..8401df8 100644
+--- a/libappstream-glib/as-utils.h
++++ b/libappstream-glib/as-utils.h
+@@ -95,6 +95,20 @@ typedef enum {
+ 	AS_VERSION_PARSE_FLAG_LAST
+ } AsVersionParseFlag;
+ 
++/**
++ * AsVersionCompareFlag:
++ * @AS_VERSION_COMPARE_FLAG_NONE:		No flags set
++ * @AS_VERSION_COMPARE_FLAG_USE_HEURISTICS:	Use a heuristic to parse version numbers
++ *
++ * The flags used when comparing version numbers.
++ **/
++typedef enum {
++	AS_VERSION_COMPARE_FLAG_NONE		= 0,
++	AS_VERSION_COMPARE_FLAG_USE_HEURISTICS	= 1 << 0,
++	/*< private >*/
++	AS_VERSION_COMPARE_FLAG_LAST
++} AsVersionCompareFlag;
++
+ /**
+  * AsUniqueIdMatchFlags:
+  * @AS_UNIQUE_ID_MATCH_FLAG_NONE:		No flags set
+-- 
+2.19.1
+
+
+From d8f67b1a9be9707c04ed4f1f71eb5365c09c275d Mon Sep 17 00:00:00 2001
+From: Kalev Lember <klember@redhat.com>
+Date: Wed, 24 Oct 2018 11:45:56 +0200
+Subject: [PATCH 2/2] trivial: Add missing prototype for as_utils_vercmp_full
+
+---
+ libappstream-glib/as-utils.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/libappstream-glib/as-utils.h b/libappstream-glib/as-utils.h
+index 8401df8..2fa5199 100644
+--- a/libappstream-glib/as-utils.h
++++ b/libappstream-glib/as-utils.h
+@@ -160,6 +160,9 @@ gboolean	 as_utils_install_filename	(AsUtilsLocation location,
+ 						 GError		**error);
+ gboolean	 as_utils_search_token_valid	(const gchar	*token);
+ gchar		**as_utils_search_tokenize	(const gchar	*search);
++gint		 as_utils_vercmp_full		(const gchar	*version_a,
++						 const gchar	*version_b,
++						 AsVersionCompareFlag flags);
+ gint		 as_utils_vercmp		(const gchar	*version_a,
+ 						 const gchar	*version_b);
+ gboolean	 as_utils_guid_is_valid		(const gchar	*guid);
+-- 
+2.19.1
+
